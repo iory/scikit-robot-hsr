@@ -33,6 +33,9 @@ class HSRB(RobotModelFromURDF):
             self.head_pan_joint,
             self.head_tilt_joint]
 
+        self.head_end_coords = CascadedCoords(
+            parent=self.head_rgbd_sensor_link,
+            name='head_end_coords')
         self.rarm_end_coords = CascadedCoords(
             parent=self.hand_palm_link,
             name='rarm_end_coords')
@@ -91,6 +94,22 @@ class HSRB(RobotModelFromURDF):
                        joint_list=rarm_joints)
         r.end_coords = self.rarm_end_coords
         r.inverse_kinematics = lambda *args, **kwargs: self.inverse_kinematics(
+            link_list=r.link_list,
+            *args, **kwargs)
+        return r
+
+    @cached_property
+    def head(self):
+        rarm_links = [self.head_pan_link,
+                      self.head_tilt_link]
+        rarm_joints = []
+        for link in rarm_links:
+            if hasattr(link, 'joint'):
+                rarm_joints.append(link.joint)
+        r = RobotModel(link_list=rarm_links,
+                       joint_list=rarm_joints)
+        r.end_coords = self.head_rgbd_sensor_link
+        r.inverse_kinematics = lambda *args, **kwargs: r.inverse_kinematics(
             link_list=r.link_list,
             *args, **kwargs)
         return r
