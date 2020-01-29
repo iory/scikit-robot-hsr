@@ -61,6 +61,7 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def rarm_controller(self):
         return dict(
+            controller_type='rarm_controller',
             controller_action='arm_trajectory_controller/follow_joint_trajectory',  # NOQA
             controller_state='arm_trajectory_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
@@ -74,6 +75,7 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def head_controller(self):
         return dict(
+            controller_type='head_controller',
             controller_action='head_trajectory_controller/follow_joint_trajectory',  # NOQA
             controller_state='head_trajectory_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
