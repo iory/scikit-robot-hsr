@@ -1,4 +1,5 @@
 from numbers import Number
+import math
 import sys
 
 import actionlib
@@ -14,10 +15,18 @@ import tmc_suction.msg
 from skrobot.interfaces.ros.move_base import ROSRobotMoveBaseInterface
 
 
+_PALM_TO_PROXIMAL_Y = 0.0245
+_PROXIMAL_TO_DISTAL_Z = 0.07
+_DISTAL_JOINT_ANGLE_OFFSET = 0.087
+_DISTAL_TO_TIP_Y = 0.01865
+_DISTAL_TO_TIP_Z = 0.04289
+
+
 class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
 
     def __init__(self, *args, **kwargs):
         enable_suction = kwargs.pop('enable_suction', True)
+        kwargs['use_tf2'] = True
         kwargs['namespace'] = 'hsrb'
         kwargs['move_base_action_name'] = 'move_base/move'
         kwargs['odom_topic'] = 'hsrb/odom'
@@ -61,6 +70,7 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def rarm_controller(self):
         return dict(
+            controller_type='rarm_controller',
             controller_action='arm_trajectory_controller/follow_joint_trajectory',  # NOQA
             controller_state='arm_trajectory_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
@@ -74,6 +84,7 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
     @property
     def head_controller(self):
         return dict(
+            controller_type='head_controller',
             controller_action='head_trajectory_controller/follow_joint_trajectory',  # NOQA
             controller_state='head_trajectory_controller/state',
             action_type=control_msgs.msg.FollowJointTrajectoryAction,
@@ -147,6 +158,25 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
             return False
         act = self.start_suction(timeout=0.0, wait=True)
         return act.get_state() == GoalStatus.SUCCEEDED
+
+    def get_gripper_distance(self):
+        joint_state = self._joint_state_msg
+        hand_motor_pos = joint_state.position[
+            joint_state.name.index('hand_motor_joint')]
+        hand_left_position = joint_state.position[
+            joint_state.name.index(
+                'hand_l_spring_proximal_joint')] + hand_motor_pos
+        hand_right_position = joint_state.position[
+            joint_state.name.index(
+                'hand_r_spring_proximal_joint')] + hand_motor_pos
+        return ((math.sin(hand_left_position) +
+                 math.sin(hand_right_position)) *
+                _PROXIMAL_TO_DISTAL_Z +
+                2 * (_PALM_TO_PROXIMAL_Y -
+                     (_DISTAL_TO_TIP_Y *
+                      math.cos(_DISTAL_JOINT_ANGLE_OFFSET) +
+                      _DISTAL_TO_TIP_Z *
+                      math.sin(_DISTAL_JOINT_ANGLE_OFFSET))))
 
     def switch_head_rgbd_map_merger(self, switch):
         if not isinstance(switch, bool):
