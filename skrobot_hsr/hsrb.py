@@ -31,7 +31,19 @@ class HSRB(RobotModelFromURDF):
             self.wrist_flex_joint,
             self.wrist_roll_joint,
             self.head_pan_joint,
-            self.head_tilt_joint]
+            self.head_tilt_joint,
+            self.hand_l_spring_proximal_joint,
+            self.hand_motor_joint,
+            self.hand_r_spring_proximal_joint
+        ]
+
+        self.hand_camera_color_optical_frame = CascadedCoords(
+            parent=self.hand_palm_link,
+            name='hand_camera_color_optical_frame')
+        self.hand_camera_color_optical_frame.translate(
+            (0.032, -0.045, -0.012))
+        self.hand_camera_color_optical_frame.rotation = \
+            [0.68079545, -0.03199039, -0.05398378,  0.72978073]
 
         self.head_end_coords = CascadedCoords(
             parent=self.head_rgbd_sensor_link,
@@ -43,6 +55,27 @@ class HSRB(RobotModelFromURDF):
             np.pi,
             [7.0710700e-01, 0.0, 7.07107004e-01])
         self.end_coords = self.rarm_end_coords
+
+        self.arm_lift_joint.hooks = [
+            lambda: self.torso_lift_joint.joint_angle(
+                self.arm_lift_joint.joint_angle() * 0.5),
+        ]
+
+        # TODO(iory) support mimic joint in scikit-robot
+        self.hand_motor_joint.hooks = [
+            lambda: self.hand_l_proximal_joint.joint_angle(
+                self.hand_motor_joint.joint_angle()),
+            lambda: self.hand_l_distal_joint.joint_angle(
+                (self.hand_motor_joint.joint_angle() * (-1.0)) + (-0.087)),
+            lambda: self.hand_r_proximal_joint.joint_angle(
+                self.hand_motor_joint.joint_angle()),
+            lambda: self.hand_r_distal_joint.joint_angle(
+                (self.hand_motor_joint.joint_angle() * (-1.0)) + (-0.087)),
+        ]
+        self.hand_l_spring_proximal_joint.hooks = [
+            lambda: self.hand_l_mimic_distal_joint.joint_angle(
+                -1.0 * self.hand_l_spring_proximal_joint.joint_angle())
+        ]
 
     def _urdf(self):
         import rospkg
@@ -70,12 +103,28 @@ class HSRB(RobotModelFromURDF):
         self.load_urdf_file(file_obj=f)
 
     def reset_pose(self):
-        return self.angle_vector(
-            [0.0, 0.0, 0.0, 0.0, 0.0, -np.pi / 2.0, 0.0, 0.0, 0.0])
+        self.base_roll_joint.joint_angle(0)
+        self.torso_lift_joint.joint_angle(0)
+        self.arm_lift_joint.joint_angle(0)
+        self.arm_flex_joint.joint_angle(0)
+        self.arm_roll_joint.joint_angle(0)
+        self.wrist_flex_joint.joint_angle(-np.pi / 2.0)
+        self.wrist_roll_joint.joint_angle(0)
+        self.head_pan_joint.joint_angle(0)
+        self.head_tilt_joint.joint_angle(0)
+        return self.angle_vector()
 
     def reset_manip_pose(self):
-        return self.angle_vector(
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
+        self.base_roll_joint.joint_angle(0)
+        self.torso_lift_joint.joint_angle(0)
+        self.arm_lift_joint.joint_angle(0)
+        self.arm_flex_joint.joint_angle(0)
+        self.arm_roll_joint.joint_angle(0)
+        self.wrist_flex_joint.joint_angle(-np.pi / 2.0)
+        self.wrist_roll_joint.joint_angle(0)
+        self.head_pan_joint.joint_angle(0)
+        self.head_tilt_joint.joint_angle(0)
+        return self.angle_vector()
 
     @cached_property
     def rarm(self):
@@ -151,8 +200,8 @@ class HSRB(RobotModelFromURDF):
             interlocking_joint_pairs = self.interlocking_joint_pairs
         for pair_a, pair_b in interlocking_joint_pairs:
             unit_angle = (pair_a.joint_angle() + pair_b.joint_angle()) / 3.0
-            pair_a.joint_angle(1.0 * unit_angle)
-            pair_b.joint_angle(2.0 * unit_angle)
+            pair_a.joint_angle(1.0 * unit_angle, enable_hook=False)
+            pair_b.joint_angle(2.0 * unit_angle, enable_hook=False)
 
     def inverse_kinematics(
             self,
@@ -160,6 +209,7 @@ class HSRB(RobotModelFromURDF):
             move_target=None,
             link_list=None,
             use_base=False,
+            base_link_weight=[0.1, 0.1, 0.1],
             **kwargs):
         move_joints_hook = kwargs.pop('move_joints_hook', [])
         move_joints_hook.append(
@@ -175,13 +225,15 @@ class HSRB(RobotModelFromURDF):
             vjoint = skrobot.model.OmniWheelJoint(
                 child_link=self,
                 parent_link=vlink,
-                min_angle=np.array([-5.0, -5.0, -100]),
-                max_angle=np.array([5.0, 5.0, 100])
+                min_angle=np.array([-20.0, -20.0, -np.pi]),
+                max_angle=np.array([20.0, 20.0, np.pi])
             )
             vlink.add_joint(vjoint)
             rlink.add_parent_link(vlink)
-            vlink.add_child_links(rlink)
+            vlink.add_child_link(rlink)
             link_list = [vlink] + link_list
+            additional_weight_list = kwargs.pop('additional_weight_list', [])
+            additional_weight_list += [(vlink, base_link_weight)]
             ret = super(HSRB, self).inverse_kinematics(
                 target_coords,
                 link_list=link_list,
@@ -192,6 +244,7 @@ class HSRB(RobotModelFromURDF):
                 additional_vel=[
                     lambda ll:
                     self.calc_vel_for_interlocking_joints(ll)],
+                additional_weight_list=additional_weight_list,
                 move_joints_hook=move_joints_hook,
                 **kwargs)
             return ret

@@ -1,3 +1,4 @@
+import math
 from numbers import Number
 import sys
 
@@ -8,16 +9,53 @@ import dynamic_reconfigure.client
 import rospy
 import std_msgs.msg
 import std_srvs.srv
+import tmc_control_msgs.msg
 import tmc_suction.msg
-
+import trajectory_msgs.msg
 
 from skrobot.interfaces.ros.move_base import ROSRobotMoveBaseInterface
+
+
+_GRIPPER_APPLY_FORCE_DELICATE_THRESHOLD = 0.8
+_HAND_MOMENT_ARM_LENGTH = 0.07
+_PALM_TO_PROXIMAL_Y = 0.0245
+_PROXIMAL_TO_DISTAL_Z = 0.07
+_DISTAL_JOINT_ANGLE_OFFSET = 0.087
+_DISTAL_TO_TIP_Y = 0.01865
+_DISTAL_TO_TIP_Z = 0.04289
+
+_DISTANCE_CONTROL_PGAIN = 0.5
+_DISTANCE_CONTROL_IGAIN = 1.0
+_DISTANCE_CONTROL_RATE = 10.0
+_DISTANCE_CONTROL_TIME_FROM_START = 0.2
+_DISTANCE_CONTROL_STALL_THRESHOLD = 0.003
+_DISTANCE_CONTROL_STALL_TIMEOUT = 1.0
+
+_HAND_MOTOR_JOINT_MAX = 1.2
+_HAND_MOTOR_JOINT_MIN = -0.5
+
+_DISTANCE_MAX = (_PALM_TO_PROXIMAL_Y -
+                 (_DISTAL_TO_TIP_Y *
+                  math.cos(_DISTAL_JOINT_ANGLE_OFFSET) +
+                  _DISTAL_TO_TIP_Z *
+                  math.sin(_DISTAL_JOINT_ANGLE_OFFSET)) +
+                 _PROXIMAL_TO_DISTAL_Z *
+                 math.sin(_HAND_MOTOR_JOINT_MAX)) * 2
+_DISTANCE_MIN = (_PALM_TO_PROXIMAL_Y -
+                 (_DISTAL_TO_TIP_Y *
+                  math.cos(_DISTAL_JOINT_ANGLE_OFFSET) +
+                  _DISTAL_TO_TIP_Z *
+                  math.sin(_DISTAL_JOINT_ANGLE_OFFSET)) +
+                 _PROXIMAL_TO_DISTAL_Z *
+                 math.sin(_HAND_MOTOR_JOINT_MIN)) * 2
 
 
 class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
 
     def __init__(self, *args, **kwargs):
         enable_suction = kwargs.pop('enable_suction', True)
+        enable_gripper = kwargs.pop('enable_gripper', True)
+        kwargs['use_tf2'] = True
         kwargs['namespace'] = 'hsrb'
         kwargs['move_base_action_name'] = 'move_base/move'
         kwargs['odom_topic'] = 'hsrb/odom'
@@ -25,6 +63,22 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
         kwargs['base_controller_action_name'] = \
             'hsrb/omni_base_controller/follow_joint_trajectory'
         super(HSRBROSRobotInterface, self).__init__(*args, **kwargs)
+
+        # gripper
+        self.enable_gripper = enable_gripper
+        if enable_gripper is True:
+            self.grasp_client = actionlib.SimpleActionClient(
+                '/hsrb/gripper_controller/grasp',
+                tmc_control_msgs.msg.GripperApplyEffortAction
+            )
+            self.apply_force_client = actionlib.SimpleActionClient(
+                '/hsrb/gripper_controller/apply_force',
+                tmc_control_msgs.msg.GripperApplyEffortAction
+            )
+            self.gripper_follow_joint_trajectory_client = \
+                actionlib.SimpleActionClient(
+                    '/hsrb/gripper_controller/follow_joint_trajectory',
+                    control_msgs.msg.FollowJointTrajectoryAction)
 
         # suction
         self.enable_suction = enable_suction
@@ -149,6 +203,171 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
             return False
         act = self.start_suction(timeout=0.0, wait=True)
         return act.get_state() == GoalStatus.SUCCEEDED
+
+    def get_gripper_distance(self):
+        joint_state = self._joint_state_msg
+        hand_motor_pos = joint_state.position[
+            joint_state.name.index('hand_motor_joint')]
+        hand_left_position = joint_state.position[
+            joint_state.name.index(
+                'hand_l_spring_proximal_joint')] + hand_motor_pos
+        hand_right_position = joint_state.position[
+            joint_state.name.index(
+                'hand_r_spring_proximal_joint')] + hand_motor_pos
+        return ((math.sin(hand_left_position) +
+                 math.sin(hand_right_position)) *
+                _PROXIMAL_TO_DISTAL_Z +
+                2 * (_PALM_TO_PROXIMAL_Y -
+                     (_DISTAL_TO_TIP_Y *
+                      math.cos(_DISTAL_JOINT_ANGLE_OFFSET) +
+                      _DISTAL_TO_TIP_Z *
+                      math.sin(_DISTAL_JOINT_ANGLE_OFFSET))))
+
+    def set_gripper_distance(self, distance, control_time=3.0):
+        """Command set gripper finger tip distance.
+
+        Parameters
+        ----------
+        distance : float
+            Distance between gripper finger tips [m]
+        """
+        if distance > _DISTANCE_MAX:
+            open_angle = _HAND_MOTOR_JOINT_MAX
+            self.gripper_command(open_angle)
+        elif distance < _DISTANCE_MIN:
+            open_angle = _HAND_MOTOR_JOINT_MIN
+            self.gripper_command(open_angle)
+        else:
+            _DISTANCE_CONTROL_RATE = 10.0
+            goal = control_msgs.msg.FollowJointTrajectoryGoal()
+            goal.trajectory.joint_names = ['hand_motor_joint']
+            goal.trajectory.points = [
+                trajectory_msgs.msg.JointTrajectoryPoint(
+                    time_from_start=rospy.Duration(
+                        1.0 / _DISTANCE_CONTROL_RATE))
+            ]
+
+            start_time = rospy.Time().now()
+            elapsed_time = rospy.Duration(0.0)
+            ierror = 0.0
+            theta_ref = math.asin(((distance / 2 -
+                                    (_PALM_TO_PROXIMAL_Y -
+                                     (_DISTAL_TO_TIP_Y *
+                                      math.cos(_DISTAL_JOINT_ANGLE_OFFSET) +
+                                      _DISTAL_TO_TIP_Z *
+                                      math.sin(_DISTAL_JOINT_ANGLE_OFFSET)))) /
+                                   _PROXIMAL_TO_DISTAL_Z))
+            rate = rospy.Rate(_DISTANCE_CONTROL_RATE)
+            last_movement_time = rospy.Time.now()
+            while elapsed_time.to_sec() < control_time:
+                try:
+                    error = distance - self.get_gripper_distance()
+                    if abs(error) > _DISTANCE_CONTROL_STALL_THRESHOLD:
+                        last_movement_time = rospy.Time.now()
+                    if((rospy.Time.now() - last_movement_time).to_sec() >
+                       _DISTANCE_CONTROL_STALL_TIMEOUT):
+                        break
+                    ierror += error
+                    open_angle = (theta_ref +
+                                  _DISTANCE_CONTROL_PGAIN * error +
+                                  _DISTANCE_CONTROL_IGAIN * ierror)
+                    goal.trajectory.points = [
+                        trajectory_msgs.msg.JointTrajectoryPoint(
+                            positions=[open_angle],
+                            time_from_start=rospy.Duration(
+                                _DISTANCE_CONTROL_TIME_FROM_START))
+                    ]
+                    self.gripper_follow_joint_trajectory_client.send_goal(goal)
+                    elapsed_time = rospy.Time().now() - start_time
+                except KeyboardInterrupt:
+                    self.gripper_follow_joint_trajectory_client.cancel_goal()
+                    return
+                rate.sleep()
+
+    def apply_force(self, effort, delicate=False, timeout=20.0):
+        """Command a gripper to execute applying force.
+
+        Parameters
+        ----------
+        effort : float
+            Force applied to grasping [N]
+            'effort' should be positive number
+        delicate : bool
+            Force control is on when delicate is ``True``
+            The range force control works well
+            is 0.2 [N] < effort < 0.6 [N]
+
+        Returns
+        -------
+            None
+        """
+        if effort < 0.0:
+            raise ValueError("negative effort is set. "
+                             'effort should be greather than 0. '
+                             'get {}'.format(effort))
+        goal = tmc_control_msgs.msg.GripperApplyEffortGoal()
+        goal.effort = - effort * _HAND_MOMENT_ARM_LENGTH
+        client = self.grasp_client
+        if delicate:
+            if effort < _GRIPPER_APPLY_FORCE_DELICATE_THRESHOLD:
+                goal.effort = effort
+                client = self.apply_force_client
+            else:
+                rospy.logwarn(
+                    "Since effort is high, force control become invalid. "
+                    "delicate effort should be smaller than {}".format(
+                        _GRIPPER_APPLY_FORCE_DELICATE_THRESHOLD))
+
+        client.send_goal(goal)
+        try:
+            timeout = rospy.Duration(timeout)
+            if client.wait_for_result(timeout):
+                client.get_result()
+                state = client.get_state()
+                if state != actionlib.GoalStatus.SUCCEEDED:
+                    raise RuntimeError()("Failed to apply force")
+            else:
+                client.cancel_goal()
+                raise RuntimeError()("Apply force timed out")
+        except KeyboardInterrupt:
+            client.cancel_goal()
+
+    def gripper_command(self, open_angle, motion_time=1.0,
+                        timeout=10.0):
+        """Command open a gripper
+
+        Parameters
+        ----------
+        open_angle : float
+            How much angle to open[rad]
+        motion_time : float
+            Time to execute command[s]
+
+        Returns
+        -------
+            None
+        """
+        goal = control_msgs.msg.FollowJointTrajectoryGoal()
+        goal.trajectory.joint_names = ['hand_motor_joint']
+        goal.trajectory.points = [
+            trajectory_msgs.msg.JointTrajectoryPoint(
+                positions=[open_angle],
+                time_from_start=rospy.Duration(motion_time))
+        ]
+
+        self.gripper_follow_joint_trajectory_client.send_goal(goal)
+        timeout = rospy.Duration(timeout)
+        try:
+            if self.gripper_follow_joint_trajectory_client.wait_for_result(
+                    timeout):
+                s = self.gripper_follow_joint_trajectory_client.get_state()
+                if s != actionlib.GoalStatus.SUCCEEDED:
+                    raise RuntimeError("Failed to follow commanded trajectory")
+            else:
+                self.gripper_follow_joint_trajectory_client.cancel_goal()
+                raise RuntimeError("Timed out")
+        except KeyboardInterrupt:
+            self.gripper_follow_joint_trajectory_client.cancel_goal()
 
     def switch_head_rgbd_map_merger(self, switch):
         if not isinstance(switch, bool):
