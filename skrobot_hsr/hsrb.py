@@ -209,8 +209,9 @@ class HSRB(RobotModelFromURDF):
             move_target=None,
             link_list=None,
             use_base=False,
-            base_link_weight=[0.1, 0.1, 0.1],
+            base_link_weight=None,
             **kwargs):
+        base_link_weight = base_link_weight or [0.1, 0.1, 0.1]
         move_joints_hook = kwargs.pop('move_joints_hook', [])
         move_joints_hook.append(
                 lambda:
