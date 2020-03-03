@@ -56,12 +56,12 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
         enable_suction = kwargs.pop('enable_suction', True)
         enable_gripper = kwargs.pop('enable_gripper', True)
         kwargs['use_tf2'] = True
-        kwargs['namespace'] = 'hsrb'
-        kwargs['move_base_action_name'] = 'move_base/move'
-        kwargs['odom_topic'] = 'hsrb/odom'
+        kwargs['namespace'] = '/hsrb'
+        kwargs['move_base_action_name'] = '/move_base/move'
+        kwargs['odom_topic'] = '/hsrb/odom'
         kwargs['base_controller_joint_names'] = ["odom_x", "odom_y", "odom_t"]
         kwargs['base_controller_action_name'] = \
-            'hsrb/omni_base_controller/follow_joint_trajectory'
+            '/hsrb/omni_base_controller/follow_joint_trajectory'
         super(HSRBROSRobotInterface, self).__init__(*args, **kwargs)
 
         # gripper
