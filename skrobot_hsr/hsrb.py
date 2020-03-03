@@ -56,27 +56,6 @@ class HSRB(RobotModelFromURDF):
             [7.0710700e-01, 0.0, 7.07107004e-01])
         self.end_coords = self.rarm_end_coords
 
-        self.arm_lift_joint.hooks = [
-            lambda: self.torso_lift_joint.joint_angle(
-                self.arm_lift_joint.joint_angle() * 0.5),
-        ]
-
-        # TODO(iory) support mimic joint in scikit-robot
-        self.hand_motor_joint.hooks = [
-            lambda: self.hand_l_proximal_joint.joint_angle(
-                self.hand_motor_joint.joint_angle()),
-            lambda: self.hand_l_distal_joint.joint_angle(
-                (self.hand_motor_joint.joint_angle() * (-1.0)) + (-0.087)),
-            lambda: self.hand_r_proximal_joint.joint_angle(
-                self.hand_motor_joint.joint_angle()),
-            lambda: self.hand_r_distal_joint.joint_angle(
-                (self.hand_motor_joint.joint_angle() * (-1.0)) + (-0.087)),
-        ]
-        self.hand_l_spring_proximal_joint.hooks = [
-            lambda: self.hand_l_mimic_distal_joint.joint_angle(
-                -1.0 * self.hand_l_spring_proximal_joint.joint_angle())
-        ]
-
     def _urdf(self):
         import rospkg
         rospack = rospkg.RosPack()
