@@ -55,35 +55,36 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
     def __init__(self, *args, **kwargs):
         enable_suction = kwargs.pop('enable_suction', True)
         enable_gripper = kwargs.pop('enable_gripper', True)
+        kwargs.setdefault('namespace', '/hsrb')
+        ns = kwargs['namespace']
         kwargs['use_tf2'] = True
-        kwargs['namespace'] = '/hsrb'
         kwargs['move_base_action_name'] = '/move_base/move'
-        kwargs['odom_topic'] = '/hsrb/odom'
+        kwargs['odom_topic'] = '{}/odom'.format(ns)
         kwargs['base_controller_joint_names'] = ["odom_x", "odom_y", "odom_t"]
         kwargs['base_controller_action_name'] = \
-            '/hsrb/omni_base_controller/follow_joint_trajectory'
+            '{}/omni_base_controller/follow_joint_trajectory'.format(ns)
         super(HSRBROSRobotInterface, self).__init__(*args, **kwargs)
 
         # gripper
         self.enable_gripper = enable_gripper
         if enable_gripper is True:
             self.grasp_client = actionlib.SimpleActionClient(
-                '/hsrb/gripper_controller/grasp',
+                '{}/gripper_controller/grasp'.format(ns),
                 tmc_control_msgs.msg.GripperApplyEffortAction
             )
             self.apply_force_client = actionlib.SimpleActionClient(
-                '/hsrb/gripper_controller/apply_force',
+                '{}/gripper_controller/apply_force'.format(ns),
                 tmc_control_msgs.msg.GripperApplyEffortAction
             )
             self.gripper_follow_joint_trajectory_client = \
                 actionlib.SimpleActionClient(
-                    '/hsrb/gripper_controller/follow_joint_trajectory',
+                    '{}/gripper_controller/follow_joint_trajectory'.format(ns),
                     control_msgs.msg.FollowJointTrajectoryAction)
 
         # suction
         self.enable_suction = enable_suction
         if enable_suction is True:
-            suction_action_name = '/hsrb/suction_control'
+            suction_action_name = '{}/suction_control'.format(ns)
             self.suction_control_client = actionlib.SimpleActionClient(
                 suction_action_name,
                 tmc_suction.msg.SuctionControlAction)
@@ -95,16 +96,16 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
                 rospy.logerr(e)
                 sys.exit(1)
             self._suction_command_pub = rospy.Publisher(
-                '/hsrb/command_suction',
+                '{}/command_suction'.format(ns),
                 std_msgs.msg.Bool, queue_size=1)
             self._pressor_sensor_msg = None
             self._pressor_sensor_sub = rospy.Subscriber(
-                '/hsrb/pressure_sensor',
+                '{}/pressure_sensor'.format(ns),
                 std_msgs.msg.Bool,
                 callback=self._pressor_sensor_callback,
                 queue_size=1)
 
-        self.led_pub = rospy.Publisher('/hsrb/command_status_led_rgb',
+        self.led_pub = rospy.Publisher('{}/command_status_led_rgb'.format(ns),
                                        std_msgs.msg.ColorRGBA,
                                        queue_size=1)
         self.display_image_pub = rospy.Publisher(
