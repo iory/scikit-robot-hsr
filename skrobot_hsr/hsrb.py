@@ -152,7 +152,7 @@ class HSRB(RobotModelFromURDF):
             interlocking_joint_pairs = self.interlocking_joint_pairs
         union_link_list = self.calc_union_link_list(link_list)
         joint_list = list(filter(lambda j: j is not None,
-                                 [l.joint for l in union_link_list]))
+                                 [link.joint for link in union_link_list]))
         pairs = list(
             filter(lambda pair:
                    not ((pair[0] not in joint_list) and
