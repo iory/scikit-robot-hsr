@@ -783,3 +783,6 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
             client.submit(traj)
 
         trajectory.wait_controllers(clients)
+
+    def clear_costmap(self):
+        pass
