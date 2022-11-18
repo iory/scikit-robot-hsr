@@ -57,6 +57,18 @@ _DISTANCE_MIN = (_PALM_TO_PROXIMAL_Y -
                  math.sin(_HAND_MOTOR_JOINT_MIN)) * 2
 
 
+def convert_to_str(x):
+    if isinstance(x, str):
+        pass
+    elif isinstance(x, bytes):
+        x = x.decode('utf-8')
+    else:
+        raise ValueError(
+            'Invalid input x type: {}'
+            .format(type(x)))
+    return x
+
+
 class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
 
     def __init__(self, *args, **kwargs):
@@ -610,7 +622,7 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
         req = self._generate_planning_request(
             tmc_planning_msgs.srv.PlanWithHandGoalsRequest)
         req.origin_to_hand_goals = odom_to_hand_poses
-        req.ref_frame_id = self._end_effector_frame
+        req.ref_frame_id = convert_to_str(self._end_effector_frame)
 
         service_name = '/plan_with_hand_goals'
         plan_service = rospy.ServiceProxy(
@@ -694,11 +706,11 @@ class HSRBROSRobotInterface(ROSRobotMoveBaseInterface):
             request.base_movement_type.val = BaseMovementType.NONE
             return request
         else:
-            use_joints = set([b'wrist_flex_joint',
-                              b'wrist_roll_joint',
-                              b'arm_roll_joint',
-                              b'arm_flex_joint',
-                              b'arm_lift_joint'])
+            use_joints = set(['wrist_flex_joint',
+                              'wrist_roll_joint',
+                              'arm_roll_joint',
+                              'arm_flex_joint',
+                              'arm_lift_joint'])
             if self._looking_hand_constraint:
                 use_joints.update(["head_pan_joint", "head_tilt_joint"])
                 request.extra_goal_constraints.append(

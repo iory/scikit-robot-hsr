@@ -9,6 +9,18 @@ from skrobot.model import RobotModel
 from skrobot.models.urdf import RobotModelFromURDF
 
 
+def convert_to_str(x):
+    if isinstance(x, str):
+        pass
+    elif isinstance(x, bytes):
+        x = x.decode('utf-8')
+    else:
+        raise ValueError(
+            'Invalid input x type: {}'
+            .format(type(x)))
+    return x
+
+
 class HSRB(RobotModelFromURDF):
 
     """HSR-b Robot Model
@@ -64,6 +76,7 @@ class HSRB(RobotModelFromURDF):
             package_path, 'robots', 'hsrb.urdf')
         with open(self.resolve_filepath, 'rb') as f:
             urdf_text = f.read()
+        urdf_text = convert_to_str(urdf_text)
         base_transmission_name = 'base_transmission'
         r_index = urdf_text.index(base_transmission_name)
         l_index = urdf_text.index(base_transmission_name, r_index + 1)
@@ -76,7 +89,7 @@ class HSRB(RobotModelFromURDF):
 
     def load_urdf(self, urdf):
         f = StringIO()
-        f.write(urdf)
+        f.write(urdf.encode('utf-8'))
         f.seek(0)
         f.name = self.resolve_filepath
         self.load_urdf_file(file_obj=f)
